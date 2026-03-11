@@ -1,6 +1,11 @@
 // @ts-ignore
 import definePlugin from "@utils/types";
 
+
+const PLUGIN_VERSION = "1.2.0";
+const UPDATE_URL = "https://raw.githubusercontent.com/AI-dude-3249/QuestCompleter/main/index.tsx";
+
+
 const SUPPORTED_TASKS = ["WATCH_VIDEO", "PLAY_ON_DESKTOP", "STREAM_ON_DESKTOP", "PLAY_ACTIVITY", "WATCH_VIDEO_ON_MOBILE"];
 const TASK_PRIORITY = ["WATCH_VIDEO", "WATCH_VIDEO_ON_MOBILE", "PLAY_ON_DESKTOP", "STREAM_ON_DESKTOP", "PLAY_ACTIVITY"];
 
@@ -22,17 +27,20 @@ function getTaskConfig(quest: any) {
 }
 
 function initStores(): boolean {
-    if (initialized) return true;
+    if (initialized) { console.log("[QC] initStores: already initialized, skipping"); return true; }
+    console.log("[QC] initStores: starting store discovery...");
     try {
         const wpRequire = (window as any).webpackChunkdiscord_app.push([[Symbol()], {}, (r: any) => r]);
         (window as any).webpackChunkdiscord_app.pop();
         const mods = Object.values(wpRequire.c) as any[];
+        console.log("[QC] initStores: got", mods.length, "webpack modules");
 
         ApplicationStreamingStore = mods.find(x =>
             x?.exports?.Z?.__proto__?.getStreamerActiveStreamMetadata
         )?.exports?.Z;
 
         if (!ApplicationStreamingStore) {
+            console.log("[QC] initStores: using exports.A variant");
             ApplicationStreamingStore = mods.find(x =>
                 x?.exports?.A?.__proto__?.getStreamerActiveStreamMetadata
             )?.exports?.A;
@@ -43,6 +51,7 @@ function initStores(): boolean {
             FluxDispatcher = mods.find(x => x?.exports?.h?.__proto__?.flushWaitQueue)?.exports?.h;
             api = mods.find(x => x?.exports?.Bo?.get)?.exports?.Bo;
         } else {
+            console.log("[QC] initStores: using exports.Z variant");
             RunningGameStore = mods.find(x => x?.exports?.ZP?.getRunningGames)?.exports?.ZP;
             QuestsStore = mods.find(x => x?.exports?.Z?.__proto__?.getQuest)?.exports?.Z;
             ChannelStore = mods.find(x => x?.exports?.Z?.__proto__?.getAllThreadsForParent)?.exports?.Z;
@@ -51,24 +60,32 @@ function initStores(): boolean {
             api = mods.find(x => x?.exports?.tn?.get)?.exports?.tn;
         }
 
+        console.log("[QC] initStores: ApplicationStreamingStore?", !!ApplicationStreamingStore);
+        console.log("[QC] initStores: RunningGameStore?", !!RunningGameStore);
+        console.log("[QC] initStores: QuestsStore?", !!QuestsStore);
+        console.log("[QC] initStores: FluxDispatcher?", !!FluxDispatcher);
+        console.log("[QC] initStores: api?", !!api);
+
         if (!QuestsStore || !FluxDispatcher || !api) {
-            console.error("Failed to find required stores");
+            console.error("[QC] initStores: FAILED – missing required store(s)");
             return false;
         }
 
         isApp = typeof (window as any).DiscordNative !== "undefined";
         initialized = true;
-        console.log("Stores initialized, isApp =", isApp);
+        console.log("[QC] initStores: done. isApp =", isApp);
         return true;
     } catch (e) {
-        console.error("Init failed:", e);
+        console.error("[QC] initStores: exception:", e);
         return false;
     }
 }
 
 function getEligibleQuests() {
-    if (!QuestsStore?.quests) return [];
-    return [...QuestsStore.quests.values()].filter((x: any) =>
+    if (!QuestsStore?.quests) { console.log("[QC] getEligibleQuests: QuestsStore or quests not ready"); return []; }
+    const all = [...QuestsStore.quests.values()];
+    console.log("[QC] getEligibleQuests: total quests in store:", all.length);
+    const eligible = all.filter((x: any) =>
         x.userStatus?.enrolledAt &&
         !x.userStatus?.completedAt &&
         new Date(x.config.expiresAt).getTime() > Date.now() &&
@@ -78,10 +95,14 @@ function getEligibleQuests() {
         const tb = TASK_PRIORITY.findIndex(t => getTaskConfig(b).tasks[t] != null);
         return (ta === -1 ? 99 : ta) - (tb === -1 ? 99 : tb);
     });
+    console.log("[QC] getEligibleQuests: eligible quests:", eligible.map((q: any) => q.config?.messages?.questName));
+    return eligible;
 }
 
 function completeQuest(questId: string, btn: HTMLButtonElement) {
+    console.log("[QC] completeQuest: starting for quest ID", questId);
     if (!initStores()) {
+        console.error("[QC] completeQuest: store init failed");
         btn.innerText = "Error: Init Failed";
         btn.style.backgroundColor = "#ED4245";
         return;
@@ -96,11 +117,12 @@ function completeQuest(questId: string, btn: HTMLButtonElement) {
 
     const quest = quests.find((q: any) => q.id === questId);
     if (!quest) {
-        console.warn("Quest not found or uncompletable", questId);
+        console.warn("[QC] completeQuest: quest not found or uncompletable:", questId);
         btn.innerText = "Error: Not Completable";
         btn.style.backgroundColor = "#ED4245";
         return;
     }
+    console.log("[QC] completeQuest: found quest:", quest.config?.messages?.questName);
 
     const pid = Math.floor(Math.random() * 30000) + 1000;
     const applicationId = quest.config.application.id;
@@ -390,69 +412,104 @@ function completeQuest(questId: string, btn: HTMLButtonElement) {
 
 let observer: MutationObserver | null = null;
 let injectInterval: ReturnType<typeof setInterval> | null = null;
-let acceptQuestClickHandler: ((e: MouseEvent) => void) | null = null;
+let globalBtn: HTMLButtonElement | null = null;
+let poll: ReturnType<typeof setInterval> | null = null;
 
-function injectGlobalButton() {
-    if (document.querySelector(".vencord-spoof-all-btn")) return;
-    if (!initStores()) return;
-    if (!QuestsStore?.quests) return;
+function ensureGlobalButton() {
 
-    const anyQuest = [...QuestsStore.quests.values()][0] as any;
-    if (!anyQuest) return;
-    const anchorText = anyQuest.config?.messages?.questName;
-    if (!anchorText) return;
+    if (globalBtn && document.body.contains(globalBtn)) return;
 
-    let questPanel: HTMLElement | null = null;
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-    let node;
-    while ((node = walker.nextNode())) {
-        if (node.textContent?.trim() !== anchorText) continue;
-
-        let el: HTMLElement | null = node.parentElement;
-        for (let i = 0; i < 20; i++) {
-            if (!el || el === document.body) break;
-            const cs = window.getComputedStyle(el);
-            const overflows = cs.overflowY === "scroll" || cs.overflowY === "auto" || cs.overflow === "scroll" || cs.overflow === "auto";
-            if (overflows && el.scrollHeight > el.clientHeight) { questPanel = el; break; }
-            el = el.parentElement as HTMLElement | null;
-        }
-        break;
-    }
-    if (!questPanel) return;
+    console.log("[QC] ensureGlobalButton: creating fixed-position Spoof All button");
 
     const btn = document.createElement("button");
     btn.className = "vencord-spoof-all-btn";
-    btn.innerText = "Spoof All";
+    btn.innerText = "⚡ Spoof All";
     btn.style.cssText = [
+        "position:fixed",
+        "bottom:80px",
+        "right:20px",
+        "z-index:99999",
         "background:#5865F2",
         "color:white",
         "border:none",
-        "border-radius:4px",
-        "padding:5px 14px",
+        "border-radius:8px",
+        "padding:10px 20px",
         "cursor:pointer",
         "font-weight:bold",
-        "font-size:13px",
-        "z-index:9999",
+        "font-size:14px",
+        "box-shadow:0 4px 15px rgba(0,0,0,0.5)",
         "pointer-events:all",
-        "transition:background 0.2s ease",
+        "transition:background 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease",
         "white-space:nowrap",
-        "display:block",
-        "margin:8px 8px 4px auto",
+        "user-select:none",
+        "letter-spacing:0.5px",
     ].join(";");
 
-    let poll: ReturnType<typeof setInterval> | null = null;
+    btn.onmouseenter = () => {
+        if (isDragging) return;
+        btn.style.transform = "scale(1.08)";
+        btn.style.boxShadow = "0 6px 24px rgba(88,101,242,0.7)";
+        btn.style.filter = "brightness(1.2)";
+    };
+    btn.onmouseleave = () => {
+        if (isDragging) return;
+        btn.style.transform = "scale(1)";
+        btn.style.boxShadow = "0 4px 15px rgba(0,0,0,0.5)";
+        btn.style.filter = "brightness(1)";
+    };
+
+
+    let isDragging = false;
+    let dragged = false;
+    let dragOffsetX = 0, dragOffsetY = 0;
+
+    btn.addEventListener("mousedown", (e) => {
+        isDragging = true;
+        dragged = false;
+        dragOffsetX = e.clientX - btn.getBoundingClientRect().left;
+        dragOffsetY = e.clientY - btn.getBoundingClientRect().top;
+        btn.style.transition = "none";
+        btn.style.cursor = "grabbing";
+        btn.style.transform = "scale(1.05)";
+        e.preventDefault();
+    });
+
+    document.addEventListener("mousemove", (e) => {
+        if (!isDragging) return;
+        dragged = true;
+        const x = e.clientX - dragOffsetX;
+        const y = e.clientY - dragOffsetY;
+        btn.style.right = "auto";
+        btn.style.bottom = "auto";
+        btn.style.left = Math.max(0, Math.min(x, window.innerWidth - btn.offsetWidth)) + "px";
+        btn.style.top = Math.max(0, Math.min(y, window.innerHeight - btn.offsetHeight)) + "px";
+    });
+
+    document.addEventListener("mouseup", () => {
+        if (!isDragging) return;
+        isDragging = false;
+        btn.style.transition = "background 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease";
+        btn.style.cursor = "pointer";
+        btn.style.transform = "scale(1)";
+        btn.style.boxShadow = "0 4px 15px rgba(0,0,0,0.5)";
+    });
 
     btn.onclick = (e) => {
+        if (dragged) { dragged = false; return; }
         e.preventDefault();
         e.stopPropagation();
 
-        if (!initStores()) return;
+        if (!initStores()) {
+            btn.innerText = "Init Failed – Reload Discord";
+            btn.style.background = "#ED4245";
+            return;
+        }
 
         if (activeSpoofs.size > 0) {
             if (poll) { clearInterval(poll); poll = null; }
             activeSpoofs.forEach(ctrl => ctrl.abort());
             activeSpoofs.clear();
-            btn.innerText = "Spoof All";
+            btn.innerText = "⚡ Spoof All";
             btn.style.background = "#5865F2";
             btn.style.color = "white";
             return;
@@ -463,14 +520,11 @@ function injectGlobalButton() {
         if (quests.length === 0) {
             const origText = btn.innerText;
             const origBg = btn.style.background;
-            const origColor = btn.style.color;
-            btn.innerText = "Accept a quest first!";
+            btn.innerText = "⚠ Accept a quest first!";
             btn.style.background = "#ED4245";
-            btn.style.color = "white";
             setTimeout(() => {
                 btn.innerText = origText;
                 btn.style.background = origBg;
-                btn.style.color = origColor;
             }, 2500);
             return;
         }
@@ -482,71 +536,221 @@ function injectGlobalButton() {
             setTimeout(() => completeQuest(q.id, ghost), i * 300);
         });
 
-        btn.innerText = `Stop (${quests.length} quest${quests.length > 1 ? "s" : ""})`;
+        btn.innerText = `⏹ Stop (${quests.length} quest${quests.length > 1 ? "s" : ""})`;
         btn.style.background = "#ED4245";
-        btn.style.color = "white";
 
+        if (poll) clearInterval(poll);
         poll = setInterval(() => {
             if (quests.every((q: any) => !activeSpoofs.has(q.id))) {
                 clearInterval(poll!); poll = null;
-                btn.innerText = "All Done!";
+                btn.innerText = "✅ All Done!";
                 btn.style.background = "#57F287";
                 btn.style.color = "black";
                 setTimeout(() => {
-                    btn.innerText = "Spoof All";
+                    btn.innerText = "⚡ Spoof All";
                     btn.style.background = "#5865F2";
                     btn.style.color = "white";
-                }, 2500);
+                }, 3000);
             }
         }, 1000);
     };
 
-    // Insert at the very top of the quest panel
-    questPanel.insertBefore(btn, questPanel.firstChild);
+    document.body.appendChild(btn);
+    globalBtn = btn;
+    console.log("[QC] ensureGlobalButton: button injected into body (fixed position)");
 }
 
 function injectButtons() {
-    injectGlobalButton();
+    if (!initStores()) return;
+    ensureGlobalButton();
+}
+
+
+
+function showUpdateBanner(remoteVersion: string, newContent: string, pluginPath: string) {
+    const existing = document.getElementById("vencord-qc-update-banner");
+    if (existing) return;
+
+    const banner = document.createElement("div");
+    banner.id = "vencord-qc-update-banner";
+    banner.style.cssText = [
+        "position:fixed",
+        "top:16px",
+        "left:50%",
+        "transform:translateX(-50%)",
+        "z-index:100000",
+        "background:#23272a",
+        "border:2px solid #57F287",
+        "color:#fff",
+        "border-radius:12px",
+        "padding:14px 20px",
+        "font-size:14px",
+        "font-weight:600",
+        "box-shadow:0 6px 30px rgba(0,0,0,0.6)",
+        "display:flex",
+        "gap:12px",
+        "align-items:center",
+        "cursor:default",
+        "user-select:none",
+        "font-family:sans-serif",
+    ].join(";");
+
+
+    let bDragging = false, bDX = 0, bDY = 0;
+    banner.addEventListener("mousedown", (e) => {
+        if ((e.target as HTMLElement).tagName === "BUTTON") return;
+        bDragging = true;
+        bDX = e.clientX - banner.getBoundingClientRect().left;
+        bDY = e.clientY - banner.getBoundingClientRect().top;
+        banner.style.transition = "none";
+        banner.style.cursor = "grabbing";
+        e.preventDefault();
+    });
+    document.addEventListener("mousemove", (e) => {
+        if (!bDragging) return;
+        banner.style.left = Math.max(0, e.clientX - bDX) + "px";
+        banner.style.top = Math.max(0, e.clientY - bDY) + "px";
+        banner.style.transform = "none";
+    });
+    document.addEventListener("mouseup", () => {
+        if (!bDragging) return;
+        bDragging = false;
+        banner.style.cursor = "default";
+    });
+
+    const icon = document.createElement("span");
+    icon.innerText = "⬆️";
+    icon.style.fontSize = "20px";
+
+    const msg = document.createElement("span");
+    msg.innerHTML = `<span style="color:#57F287">QuestCompleter</span> v${remoteVersion} is available! <span style="color:#aaa;font-size:12px">(current: v${PLUGIN_VERSION})</span>`;
+
+    const updateBtn = document.createElement("button");
+    updateBtn.innerText = "Update & Reload";
+    updateBtn.style.cssText = "background:#57F287;color:#000;border:none;border-radius:7px;padding:7px 16px;cursor:pointer;font-weight:bold;font-size:13px;flex-shrink:0;";
+
+    const dismissBtn = document.createElement("button");
+    dismissBtn.innerText = "✕";
+    dismissBtn.style.cssText = "background:transparent;border:none;color:#aaa;cursor:pointer;font-size:18px;padding:0 4px;flex-shrink:0;";
+    dismissBtn.title = "Dismiss";
+
+    updateBtn.onmouseenter = () => { updateBtn.style.filter = "brightness(1.15)"; };
+    updateBtn.onmouseleave = () => { updateBtn.style.filter = "brightness(1)"; };
+
+    updateBtn.onclick = async () => {
+        updateBtn.innerText = "Updating...";
+        updateBtn.disabled = true;
+        try {
+
+            const fs = (0, eval)("require")("fs");
+            fs.writeFileSync(pluginPath, newContent, "utf-8");
+            updateBtn.innerText = "✅ Done! Reload Discord";
+            updateBtn.style.background = "#5865F2";
+            updateBtn.style.color = "white";
+
+            setTimeout(() => location.reload(), 2000);
+        } catch (err) {
+            console.error("[QC] Auto-update write failed:", err);
+            updateBtn.innerText = "❌ Write failed – see console";
+            updateBtn.style.background = "#ED4245";
+            updateBtn.style.color = "white";
+        }
+    };
+
+    dismissBtn.onclick = () => banner.remove();
+
+    banner.append(icon, msg, updateBtn, dismissBtn);
+    document.body.appendChild(banner);
+    console.log("[QC] Update banner shown for v" + remoteVersion);
+}
+
+async function checkForUpdates() {
+    try {
+        console.log("[QC] Checking for updates... (current: v" + PLUGIN_VERSION + ")");
+        const res = await fetch(UPDATE_URL + "?t=" + Date.now(), { cache: "no-store" });
+        if (!res.ok) { console.warn("[QC] Update check failed: HTTP", res.status); return; }
+        const text = await res.text();
+
+        const match = text.match(/const PLUGIN_VERSION = "([^"]+)"/);
+        if (!match) { console.warn("[QC] Could not parse remote version"); return; }
+        const remoteVersion = match[1];
+
+        if (remoteVersion === PLUGIN_VERSION) {
+            console.log("[QC] Already up to date (v" + PLUGIN_VERSION + ")");
+            return;
+        }
+
+        console.log(`[QC] Update found: v${PLUGIN_VERSION} -> v${remoteVersion}`);
+
+
+        let pluginPath = "";
+        try {
+            const path = (0, eval)("require")("path");
+            const os = (0, eval)("require")("os");
+            const fs = (0, eval)("require")("fs");
+            const candidates = [
+                path.join(os.homedir(), "QuestCompleter", "index.tsx"),
+                path.join(((window as any).process?.env?.APPDATA) ?? "", "Vencord", "src", "userplugins", "QuestCompleter", "index.tsx"),
+                path.join(((window as any).process?.env?.APPDATA) ?? "", "Vencord", "userplugins", "QuestCompleter", "index.tsx"),
+                path.join(os.homedir(), ".config", "Vencord", "src", "userplugins", "QuestCompleter", "index.tsx"),
+            ];
+            for (const c of candidates) {
+                if (fs.existsSync(c)) { pluginPath = c; break; }
+            }
+            if (!pluginPath) console.warn("[QC] Plugin file path not found in known locations, banner will show but write may fail");
+        } catch {
+            console.warn("[QC] Could not resolve plugin path (no fs access?)");
+        }
+
+        showUpdateBanner(remoteVersion, text, pluginPath);
+    } catch (e) {
+        console.warn("[QC] Update check exception:", e);
+    }
 }
 
 export default definePlugin({
     name: "QuestCompleter",
     description: "Adds a 'Spoof All' button next to the orbs counter to automatically complete all accepted quests in priority order.",
-    authors: [{ name: "ai_dude_3249", id: 1209031711242059847n }],
+    authors: [{ name: "AI dude", id: 1209031711242059847n }],
 
     start() {
-        console.log("Starting QuestCompleter plugin...");
-
-        observer = new MutationObserver(() => injectButtons());
-        observer.observe(document.body, { childList: true, subtree: true });
-        injectInterval = setInterval(() => injectButtons(), 3000);
-        setTimeout(() => injectButtons(), 2000);
 
 
-        acceptQuestClickHandler = (e: MouseEvent) => {
-            const target = e.target as HTMLElement;
-            const b = target.closest("button");
-            if (!b) return;
-            const t = b.textContent?.trim() ?? "";
-            if (/accept/i.test(t)) {
-                setTimeout(() => injectButtons(), 1500);
-                setTimeout(() => injectButtons(), 3000);
-            }
-        };
-        document.body.addEventListener("click", acceptQuestClickHandler, true);
+        setTimeout(() => checkForUpdates(), 5000);
+
+        injectButtons();
+        setTimeout(() => injectButtons(), 500);
+        setTimeout(() => injectButtons(), 1500);
+
+
+        injectInterval = setInterval(() => ensureGlobalButton(), 1000);
+
+        observer = new MutationObserver(() => ensureGlobalButton());
+        observer.observe(document.body, { childList: true, subtree: false });
     },
 
+
     stop() {
-        console.log("Stopping QuestCompleter plugin...");
+        console.log("[QC] stop: plugin stopping");
         observer?.disconnect();
         observer = null;
         if (injectInterval) { clearInterval(injectInterval); injectInterval = null; }
-        if (acceptQuestClickHandler) {
-            document.body.removeEventListener("click", acceptQuestClickHandler, true);
-            acceptQuestClickHandler = null;
-        }
+        if (poll) { clearInterval(poll); poll = null; }
+        globalBtn?.remove();
+        globalBtn = null;
         document.querySelectorAll(".vencord-spoof-all-btn").forEach(b => b.remove());
         activeSpoofs.forEach(ctrl => ctrl.abort());
         activeSpoofs.clear();
+        console.log("[QC] stop: cleared spoofs and removed button");
+
+        initialized = false;
+        ApplicationStreamingStore = undefined;
+        RunningGameStore = undefined;
+        QuestsStore = undefined;
+        ChannelStore = undefined;
+        GuildChannelStore = undefined;
+        FluxDispatcher = undefined;
+        api = undefined;
+        console.log("[QC] stop: stores reset");
     }
 });
