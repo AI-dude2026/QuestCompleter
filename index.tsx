@@ -3,7 +3,7 @@ import definePlugin from "@utils/types";
 
 
 const PLUGIN_VERSION = "1.2.1";
-const UPDATE_URL = "https://raw.githubusercontent.com/AI-dude-3249/QuestCompleter/main/index.tsx";
+const UPDATE_URL = "https://raw.githubusercontent.com/AI-dude2026/QuestCompleter/main/index.tsx";
 
 
 const SUPPORTED_TASKS = ["WATCH_VIDEO", "PLAY_ON_DESKTOP", "STREAM_ON_DESKTOP", "PLAY_ACTIVITY", "WATCH_VIDEO_ON_MOBILE"];
@@ -419,11 +419,11 @@ function ensureGlobalButton() {
 
     if (globalBtn && document.body.contains(globalBtn)) return;
 
-    console.log("[QC] ensureGlobalButton: creating fixed-position Spoof All button");
+    console.log("[QC] ensureGlobalButton: creating fixed-position Spoof All Quests button");
 
     const btn = document.createElement("button");
     btn.className = "vencord-spoof-all-btn";
-    btn.innerText = "⚡ Spoof All";
+    btn.innerText = "⚡ Spoof All Quests";
     btn.style.cssText = [
         "position:fixed",
         "bottom:80px",
@@ -509,7 +509,7 @@ function ensureGlobalButton() {
             if (poll) { clearInterval(poll); poll = null; }
             activeSpoofs.forEach(ctrl => ctrl.abort());
             activeSpoofs.clear();
-            btn.innerText = "⚡ Spoof All";
+            btn.innerText = "⚡ Spoof All Quests";
             btn.style.background = "#5865F2";
             btn.style.color = "white";
             return;
@@ -547,7 +547,7 @@ function ensureGlobalButton() {
                 btn.style.background = "#57F287";
                 btn.style.color = "black";
                 setTimeout(() => {
-                    btn.innerText = "⚡ Spoof All";
+                    btn.innerText = "⚡ Spoof All Quests";
                     btn.style.background = "#5865F2";
                     btn.style.color = "white";
                 }, 3000);
@@ -710,7 +710,7 @@ async function checkForUpdates() {
 
 export default definePlugin({
     name: "QuestCompleter",
-    description: "Adds a 'Spoof All' button next to the orbs counter to automatically complete all accepted quests in priority order.",
+    description: "Adds a 'Spoof All Quests' button next to the orbs counter to automatically complete all accepted quests in priority order.",
     authors: [{ name: "AI dude", id: 1209031711242059847n }],
 
     start() {

@@ -8,10 +8,20 @@
 
 ## Features
 
-* Adds a **Spoof** button directly inside your Discord Quests tab.
-* Fakes application streaming, game execution, and video watching entirely in the background.
-* Accurate progress tracking directly on the Spoof button UI.
-* Cancel/Stop button to cleanly abort background tasks without restarting Discord.
+* **Global "⚡ Spoof All Quests" button** — a single draggable floating button that handles all accepted quests at once.
+* **Draggable UI** — click and drag the button anywhere on screen; it stays put between interactions.
+* **Priority-based quest ordering** — quests are completed in a smart order: Video → Mobile Video → Desktop Play → Stream → Activity.
+* **Multi-quest support** — spoof every accepted quest simultaneously with staggered starts.
+* **All 5 task types supported:**
+  * `WATCH_VIDEO` — fakes video watch progress via `/quests/{id}/video-progress`.
+  * `WATCH_VIDEO_ON_MOBILE` — same as above, treated identically.
+  * `PLAY_ON_DESKTOP` — spoofs a fake running game process via `RunningGameStore`.
+  * `STREAM_ON_DESKTOP` — fakes an active stream via `ApplicationStreamingStore`.
+  * `PLAY_ACTIVITY` — sends heartbeats for activity-based quests (requires a voice channel).
+* **Live progress display** — the button shows real-time percentage (e.g. `Spoofing Video: 73%`) as spoofing runs.
+* **Stop / Cancel** — click the button while spoofing is active to instantly abort all running tasks cleanly.
+* **Auto-updater** — on startup the plugin fetches the latest version from GitHub. If a newer version is found, a draggable update banner appears with a one-click **Update & Reload** button that writes the new file and reloads Discord automatically.
+* **Clean teardown** — disabling the plugin via Vencord settings aborts all active spoofs, removes the button, and resets all internal state.
 
 ---
 
