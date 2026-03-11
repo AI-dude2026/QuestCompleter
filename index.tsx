@@ -412,6 +412,7 @@ function completeQuest(questId: string, btn: HTMLButtonElement) {
 
 let observer: MutationObserver | null = null;
 let injectInterval: ReturnType<typeof setInterval> | null = null;
+let updateInterval: ReturnType<typeof setInterval> | null = null;
 let globalBtn: HTMLButtonElement | null = null;
 let poll: ReturnType<typeof setInterval> | null = null;
 
@@ -717,6 +718,7 @@ export default definePlugin({
 
 
         setTimeout(() => checkForUpdates(), 5000);
+        updateInterval = setInterval(() => checkForUpdates(), 10 * 60 * 1000);
 
         injectButtons();
         setTimeout(() => injectButtons(), 500);
@@ -735,6 +737,7 @@ export default definePlugin({
         observer?.disconnect();
         observer = null;
         if (injectInterval) { clearInterval(injectInterval); injectInterval = null; }
+        if (updateInterval) { clearInterval(updateInterval); updateInterval = null; }
         if (poll) { clearInterval(poll); poll = null; }
         globalBtn?.remove();
         globalBtn = null;
