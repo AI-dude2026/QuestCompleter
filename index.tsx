@@ -2,6 +2,7 @@
 import definePlugin from "@utils/types";
 
 const SUPPORTED_TASKS = ["WATCH_VIDEO", "PLAY_ON_DESKTOP", "STREAM_ON_DESKTOP", "PLAY_ACTIVITY", "WATCH_VIDEO_ON_MOBILE"];
+const TASK_PRIORITY = ["WATCH_VIDEO", "WATCH_VIDEO_ON_MOBILE", "PLAY_ON_DESKTOP", "STREAM_ON_DESKTOP", "PLAY_ACTIVITY"];
 
 let ApplicationStreamingStore: any;
 let RunningGameStore: any;
@@ -12,10 +13,7 @@ let FluxDispatcher: any;
 let api: any;
 let isApp: boolean;
 let activeSpoofs = new Map<string, AbortController>();
-
-
 let initialized = false;
-
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
@@ -25,7 +23,6 @@ function getTaskConfig(quest: any) {
 
 function initStores(): boolean {
     if (initialized) return true;
-
     try {
         const wpRequire = (window as any).webpackChunkdiscord_app.push([[Symbol()], {}, (r: any) => r]);
         (window as any).webpackChunkdiscord_app.pop();
@@ -67,6 +64,20 @@ function initStores(): boolean {
         console.error("Init failed:", e);
         return false;
     }
+}
+
+function getEligibleQuests() {
+    if (!QuestsStore?.quests) return [];
+    return [...QuestsStore.quests.values()].filter((x: any) =>
+        x.userStatus?.enrolledAt &&
+        !x.userStatus?.completedAt &&
+        new Date(x.config.expiresAt).getTime() > Date.now() &&
+        SUPPORTED_TASKS.some((y: string) => Object.keys(getTaskConfig(x).tasks).includes(y))
+    ).sort((a: any, b: any) => {
+        const ta = TASK_PRIORITY.findIndex(t => getTaskConfig(a).tasks[t] != null);
+        const tb = TASK_PRIORITY.findIndex(t => getTaskConfig(b).tasks[t] != null);
+        return (ta === -1 ? 99 : ta) - (tb === -1 ? 99 : tb);
+    });
 }
 
 function completeQuest(questId: string, btn: HTMLButtonElement) {
@@ -116,7 +127,6 @@ function completeQuest(questId: string, btn: HTMLButtonElement) {
         btn.dataset.mode = "spoof";
         activeSpoofs.delete(questId);
     };
-
 
     if (taskName === "WATCH_VIDEO" || taskName === "WATCH_VIDEO_ON_MOBILE") {
         const maxFuture = 10, speed = 7, interval = 1;
@@ -168,7 +178,6 @@ function completeQuest(questId: string, btn: HTMLButtonElement) {
         })();
 
         console.log(`Spoofing video: ${questName}`);
-
 
     } else if (taskName === "PLAY_ON_DESKTOP") {
         if (!isApp) {
@@ -380,148 +389,163 @@ function completeQuest(questId: string, btn: HTMLButtonElement) {
 
 
 let observer: MutationObserver | null = null;
-let isInjecting = false;
+let injectInterval: ReturnType<typeof setInterval> | null = null;
+let acceptQuestClickHandler: ((e: MouseEvent) => void) | null = null;
 
-function injectButtons() {
-    if (isInjecting) return;
-    isInjecting = true;
-    setTimeout(() => { isInjecting = false; }, 2000);
-
+function injectGlobalButton() {
+    if (document.querySelector(".vencord-spoof-all-btn")) return;
     if (!initStores()) return;
     if (!QuestsStore?.quests) return;
 
-    const quests = [...QuestsStore.quests.values()].filter((x: any) =>
-        x.userStatus?.enrolledAt &&
-        !x.userStatus?.completedAt &&
-        new Date(x.config.expiresAt).getTime() > Date.now() &&
-        SUPPORTED_TASKS.some((y: string) => Object.keys(getTaskConfig(x).tasks).includes(y))
-    );
+    const anyQuest = [...QuestsStore.quests.values()][0] as any;
+    if (!anyQuest) return;
+    const anchorText = anyQuest.config?.messages?.questName;
+    if (!anchorText) return;
 
-    if (quests.length === 0) return;
-
+    let questPanel: HTMLElement | null = null;
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     let node;
-    const questNames = quests.map((q: any) => q.config.messages.questName);
-    const alreadyInjected = new Set<string>();
-
     while ((node = walker.nextNode())) {
-        const text = node.textContent?.trim();
-        if (text && questNames.includes(text)) {
-            const matchedQuest = quests.find((q: any) => q.config.messages.questName === text);
-            if (!matchedQuest) continue;
-            if (alreadyInjected.has(matchedQuest.id)) continue;
+        if (node.textContent?.trim() !== anchorText) continue;
 
-            const parentElement = node.parentElement;
-            if (!parentElement) continue;
-
-            let container: HTMLElement | null = parentElement;
-            let found = false;
-            for (let i = 0; i < 15; i++) {
-                if (!container) break;
-                if (container.querySelector(".vencord-spoof-quest-btn")) {
-                    found = true;
-                    break;
-                }
-                container = container.parentElement as HTMLElement | null;
-            }
-            if (found) { alreadyInjected.add(matchedQuest.id); continue; }
-
-            let widthAncestor: HTMLElement | null = parentElement;
-            for (let i = 0; i < 8; i++) {
-                if (!widthAncestor || widthAncestor === document.body) break;
-                if (widthAncestor.offsetWidth > 400) break;
-                widthAncestor = widthAncestor.parentElement;
-            }
-            if (!widthAncestor || widthAncestor.offsetWidth <= 400 || widthAncestor === document.body) continue;
-
-            const btn = document.createElement("button");
-            btn.className = "vencord-spoof-quest-btn";
-            btn.innerText = "Spoof";
-            btn.title = `Spoof: ${text}`;
-            btn.dataset.mode = "spoof";
-            btn.dataset.questId = matchedQuest.id;
-
-            btn.style.cssText = [
-                "background:#5865F2",
-                "color:white",
-                "border:none",
-                "border-radius:4px",
-                "padding:6px 16px",
-                "cursor:pointer",
-                "font-weight:bold",
-                "font-size:13px",
-                "position:absolute",
-                "top:12px",
-                "right:12px",
-                "z-index:9999",
-                "pointer-events:all",
-                "transition:background 0.2s ease",
-            ].join(";");
-
-            btn.onclick = (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-
-                if (btn.dataset.mode === "stop") {
-                    const ctrl = activeSpoofs.get(matchedQuest.id);
-                    if (ctrl) ctrl.abort();
-                    return;
-                }
-
-                if (activeSpoofs.has(matchedQuest.id)) return;
-
-                btn.innerText = "...";
-                btn.style.background = "#FEE75C";
-                btn.style.color = "black";
-                btn.dataset.mode = "running";
-                completeQuest(matchedQuest.id, btn);
-            };
-
-            widthAncestor.style.position = "relative";
-            widthAncestor.appendChild(btn);
-            alreadyInjected.add(matchedQuest.id);
+        let el: HTMLElement | null = node.parentElement;
+        for (let i = 0; i < 20; i++) {
+            if (!el || el === document.body) break;
+            const cs = window.getComputedStyle(el);
+            const overflows = cs.overflowY === "scroll" || cs.overflowY === "auto" || cs.overflow === "scroll" || cs.overflow === "auto";
+            if (overflows && el.scrollHeight > el.clientHeight) { questPanel = el; break; }
+            el = el.parentElement as HTMLElement | null;
         }
+        break;
     }
+    if (!questPanel) return;
+
+    const btn = document.createElement("button");
+    btn.className = "vencord-spoof-all-btn";
+    btn.innerText = "Spoof All";
+    btn.style.cssText = [
+        "background:#5865F2",
+        "color:white",
+        "border:none",
+        "border-radius:4px",
+        "padding:5px 14px",
+        "cursor:pointer",
+        "font-weight:bold",
+        "font-size:13px",
+        "z-index:9999",
+        "pointer-events:all",
+        "transition:background 0.2s ease",
+        "white-space:nowrap",
+        "display:block",
+        "margin:8px 8px 4px auto",
+    ].join(";");
+
+    let poll: ReturnType<typeof setInterval> | null = null;
+
+    btn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (!initStores()) return;
+
+        if (activeSpoofs.size > 0) {
+            if (poll) { clearInterval(poll); poll = null; }
+            activeSpoofs.forEach(ctrl => ctrl.abort());
+            activeSpoofs.clear();
+            btn.innerText = "Spoof All";
+            btn.style.background = "#5865F2";
+            btn.style.color = "white";
+            return;
+        }
+
+        const quests = getEligibleQuests();
+
+        if (quests.length === 0) {
+            const origText = btn.innerText;
+            const origBg = btn.style.background;
+            const origColor = btn.style.color;
+            btn.innerText = "Accept a quest first!";
+            btn.style.background = "#ED4245";
+            btn.style.color = "white";
+            setTimeout(() => {
+                btn.innerText = origText;
+                btn.style.background = origBg;
+                btn.style.color = origColor;
+            }, 2500);
+            return;
+        }
+
+        quests.forEach((q: any, i: number) => {
+            if (activeSpoofs.has(q.id)) return;
+            const ghost = document.createElement("button") as HTMLButtonElement;
+            ghost.dataset.mode = "spoof";
+            setTimeout(() => completeQuest(q.id, ghost), i * 300);
+        });
+
+        btn.innerText = `Stop (${quests.length} quest${quests.length > 1 ? "s" : ""})`;
+        btn.style.background = "#ED4245";
+        btn.style.color = "white";
+
+        poll = setInterval(() => {
+            if (quests.every((q: any) => !activeSpoofs.has(q.id))) {
+                clearInterval(poll!); poll = null;
+                btn.innerText = "All Done!";
+                btn.style.background = "#57F287";
+                btn.style.color = "black";
+                setTimeout(() => {
+                    btn.innerText = "Spoof All";
+                    btn.style.background = "#5865F2";
+                    btn.style.color = "white";
+                }, 2500);
+            }
+        }, 1000);
+    };
+
+    // Insert at the very top of the quest panel
+    questPanel.insertBefore(btn, questPanel.firstChild);
 }
 
-let injectInterval: ReturnType<typeof setInterval> | null = null;
+function injectButtons() {
+    injectGlobalButton();
+}
 
 export default definePlugin({
     name: "QuestCompleter",
-    description: "Adds a 'Spoof' button to incomplete quests in the Quests tab to automatically fake the game, stream or video requirements using a background process.",
+    description: "Adds a 'Spoof All' button next to the orbs counter to automatically complete all accepted quests in priority order.",
     authors: [{ name: "ai_dude_3249", id: 1209031711242059847n }],
-
 
     start() {
         console.log("Starting QuestCompleter plugin...");
 
-        observer = new MutationObserver(() => {
-
-            injectButtons();
-        });
-
+        observer = new MutationObserver(() => injectButtons());
         observer.observe(document.body, { childList: true, subtree: true });
-
         injectInterval = setInterval(() => injectButtons(), 3000);
-
         setTimeout(() => injectButtons(), 2000);
+
+
+        acceptQuestClickHandler = (e: MouseEvent) => {
+            const target = e.target as HTMLElement;
+            const b = target.closest("button");
+            if (!b) return;
+            const t = b.textContent?.trim() ?? "";
+            if (/accept/i.test(t)) {
+                setTimeout(() => injectButtons(), 1500);
+                setTimeout(() => injectButtons(), 3000);
+            }
+        };
+        document.body.addEventListener("click", acceptQuestClickHandler, true);
     },
 
     stop() {
         console.log("Stopping QuestCompleter plugin...");
-        if (observer) {
-            observer.disconnect();
-            observer = null;
+        observer?.disconnect();
+        observer = null;
+        if (injectInterval) { clearInterval(injectInterval); injectInterval = null; }
+        if (acceptQuestClickHandler) {
+            document.body.removeEventListener("click", acceptQuestClickHandler, true);
+            acceptQuestClickHandler = null;
         }
-        if (injectInterval) {
-            clearInterval(injectInterval);
-            injectInterval = null;
-        }
-
-        const existingBtns = document.querySelectorAll(".vencord-spoof-quest-btn");
-        existingBtns.forEach(btn => btn.remove());
-
-
+        document.querySelectorAll(".vencord-spoof-all-btn").forEach(b => b.remove());
         activeSpoofs.forEach(ctrl => ctrl.abort());
         activeSpoofs.clear();
     }
