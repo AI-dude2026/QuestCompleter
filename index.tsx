@@ -2,7 +2,7 @@
 import definePlugin from "@utils/types";
 
 
-const PLUGIN_VERSION = "1.2.2";
+const PLUGIN_VERSION = "1.2.3";
 const UPDATE_URL = "https://raw.githubusercontent.com/AI-dude2026/QuestCompleter/main/index.tsx";
 
 
@@ -643,7 +643,7 @@ function showUpdateBanner(remoteVersion: string, newContent: string, pluginPath:
         updateBtn.disabled = true;
         try {
 
-            const fs = (0, eval)("require")("fs");
+            const fs = (window as any).require("fs");
             fs.writeFileSync(pluginPath, newContent, "utf-8");
             updateBtn.innerText = "✅ Done! Reload Discord";
             updateBtn.style.background = "#5865F2";
@@ -686,9 +686,9 @@ async function checkForUpdates() {
 
         let pluginPath = "";
         try {
-            const path = (0, eval)("require")("path");
-            const os = (0, eval)("require")("os");
-            const fs = (0, eval)("require")("fs");
+            const path = (window as any).require("path");
+            const os = (window as any).require("os");
+            const fs = (window as any).require("fs");
             const candidates = [
                 path.join(os.homedir(), "QuestCompleter", "index.tsx"),
                 path.join(((window as any).process?.env?.APPDATA) ?? "", "Vencord", "src", "userplugins", "QuestCompleter", "index.tsx"),
