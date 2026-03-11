@@ -2,7 +2,7 @@
 import definePlugin from "@utils/types";
 
 
-const PLUGIN_VERSION = "1.2.0";
+const PLUGIN_VERSION = "1.2.1";
 const UPDATE_URL = "https://raw.githubusercontent.com/AI-dude-3249/QuestCompleter/main/index.tsx";
 
 
