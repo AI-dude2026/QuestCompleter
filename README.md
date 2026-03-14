@@ -31,7 +31,7 @@ This plugin requires you to be running Vencord from source so that you can compi
 
 1.  Ensure you have cloned the Vencord repository (e.g. `git clone https://github.com/Vendicated/Vencord.git`).
 2.  Inside your `Vencord` repo, ensure the `src/userplugins` folder exists.
-3.  Move this `vencord-quest-completer` folder *into* your `src/userplugins` directory.
+3.  Move this `QuestCompleter` folder *into* your `src/userplugins` directory.
     * Example path: `C:\Users\YourName\Vencord\src\userplugins\vencord-quest-completer\`
 4.  Open your command line / terminal inside your main `Vencord` directory.
 5.  Compile Vencord:
